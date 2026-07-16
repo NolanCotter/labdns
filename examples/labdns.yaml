@@ -1,0 +1,22 @@
+version: 1
+installation:
+  name: home-lab
+  data_directory: ./.labdns
+domain:
+  zone: home.arpa
+  default_ttl: 5m
+  create_ipv4: true
+provider:
+  type: pihole
+  base_url: http://10.0.0.2
+  credentials:
+    secret_ref: env:LABDNS_PIHOLE_TOKEN
+discovery:
+  docker:
+    enabled: true
+    socket: unix:///var/run/docker.sock
+    host_addresses: [10.0.0.20]
+naming:
+  collision_strategy: suffix-host
+verification:
+  direct_dns_server: 10.0.0.2:53

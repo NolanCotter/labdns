@@ -1,0 +1,11 @@
+/bin/
+/dist/
+/dist-check/
+/.tools/
+/smoke/
+/coverage.out
+/labdns
+*.db
+*.db-*
+*.tar.gz
+.env

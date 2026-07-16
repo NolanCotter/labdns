@@ -1,0 +1,19 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  test:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+      - run: go mod tidy
+      - run: $files = gofmt -l .; if ($files) { $files; exit 1 }
+        shell: pwsh
+      - run: go vet ./...
+      - run: go test ./...
+      - run: go build ./cmd/labdns
