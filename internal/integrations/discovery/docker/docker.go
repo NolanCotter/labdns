@@ -17,8 +17,11 @@ import (
 )
 
 type Discoverer struct {
-	Socket        string
-	HostAddresses []netip.Addr
+	Socket            string
+	HostAddresses     []netip.Addr
+	HostIPv6Addresses []netip.Addr
+	Client            *http.Client
+	BaseURL           string
 }
 type summary struct {
 	ID     string            `json:"Id"`
@@ -37,7 +40,8 @@ type inspect struct {
 	} `json:"HostConfig"`
 	NetworkSettings struct {
 		Networks map[string]struct {
-			IPAddress string `json:"IPAddress"`
+			IPAddress         string `json:"IPAddress"`
+			GlobalIPv6Address string `json:"GlobalIPv6Address"`
 		} `json:"Networks"`
 	} `json:"NetworkSettings"`
 }
@@ -62,6 +66,9 @@ func (d Discoverer) Discover(ctx context.Context) ([]dns.Service, error) {
 	return out, nil
 }
 func (d Discoverer) client() (*http.Client, error) {
+	if d.Client != nil {
+		return d.Client, nil
+	}
 	socket := d.Socket
 	if socket == "" {
 		socket = "unix:///var/run/docker.sock"
@@ -80,7 +87,11 @@ func (d Discoverer) client() (*http.Client, error) {
 	return &http.Client{Timeout: 15 * time.Second, Transport: transport}, nil
 }
 func (d Discoverer) get(ctx context.Context, c *http.Client, path string, out any) error {
-	r, e := http.NewRequestWithContext(ctx, http.MethodGet, "http://docker"+path, nil)
+	base := d.BaseURL
+	if base == "" {
+		base = "http://docker"
+	}
+	r, e := http.NewRequestWithContext(ctx, http.MethodGet, strings.TrimRight(base, "/")+path, nil)
 	if e != nil {
 		return e
 	}
@@ -110,20 +121,26 @@ func (d Discoverer) service(c summary, in inspect) dns.Service {
 		published = published || p.PublicPort != 0
 	}
 	v4 := []netip.Addr{}
+	v6 := []netip.Addr{}
 	if published || in.HostConfig.NetworkMode == "host" {
 		v4 = append(v4, d.HostAddresses...)
+		v6 = append(v6, d.HostIPv6Addresses...)
 	} else {
 		for _, n := range in.NetworkSettings.Networks {
 			if ip, e := netip.ParseAddr(n.IPAddress); e == nil && !ip.IsLoopback() {
 				v4 = append(v4, ip)
 			}
+			if ip, e := netip.ParseAddr(n.GlobalIPv6Address); e == nil && !ip.IsLoopback() {
+				v6 = append(v6, ip)
+			}
 		}
 	}
 	sort.Slice(v4, func(i, j int) bool { return v4[i].Less(v4[j]) })
+	sort.Slice(v6, func(i, j int) bool { return v6[i].Less(v6[j]) })
 	if n := labels["com.docker.compose.service"]; n != "" {
 		name = n
 	}
-	return dns.Service{ID: uuid.NewSHA1(uuid.NameSpaceURL, []byte("docker:"+c.ID)).String(), Name: name, Source: dns.SourceDocker, HostID: "docker-host", IPv4Addresses: v4, Ports: ports, ContainerID: c.ID, ComposeProject: labels["com.docker.compose.project"], ComposeService: labels["com.docker.compose.service"], Labels: labels, Metadata: map[string]string{"address_class": addressClass(published, in.HostConfig.NetworkMode)}}
+	return dns.Service{ID: uuid.NewSHA1(uuid.NameSpaceURL, []byte("docker:"+c.ID)).String(), Name: name, Source: dns.SourceDocker, HostID: "docker-host", IPv4Addresses: v4, IPv6Addresses: v6, Ports: ports, ContainerID: c.ID, ComposeProject: labels["com.docker.compose.project"], ComposeService: labels["com.docker.compose.service"], Labels: labels, Metadata: map[string]string{"address_class": addressClass(published, in.HostConfig.NetworkMode)}}
 }
 func addressClass(published bool, network string) string {
 	if network == "host" {

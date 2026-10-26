@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strings"
@@ -30,19 +31,30 @@ type Domain struct {
 	CreateIPv4 bool          `yaml:"create_ipv4"`
 	CreateIPv6 bool          `yaml:"create_ipv6"`
 	CreatePTR  bool          `yaml:"create_ptr"`
+	PTRZone    string        `yaml:"ptr_zone,omitempty"`
+	CreateSRV  bool          `yaml:"create_srv"`
+	CreateTXT  bool          `yaml:"create_txt"`
 }
 type Credentials struct {
+	Username  string `yaml:"username,omitempty"`
 	SecretRef string `yaml:"secret_ref"`
 }
 type Provider struct {
-	Type        string      `yaml:"type"`
-	BaseURL     string      `yaml:"base_url"`
-	Credentials Credentials `yaml:"credentials"`
+	Type          string      `yaml:"type"`
+	BaseURL       string      `yaml:"base_url"`
+	Server        string      `yaml:"server,omitempty"`
+	Zone          string      `yaml:"zone,omitempty"`
+	HostsFile     string      `yaml:"hosts_file,omitempty"`
+	TSIGKey       string      `yaml:"tsig_key,omitempty"`
+	TSIGAlgorithm string      `yaml:"tsig_algorithm,omitempty"`
+	TSIGSecretRef string      `yaml:"tsig_secret_ref,omitempty"`
+	Credentials   Credentials `yaml:"credentials"`
 }
 type Docker struct {
-	Enabled       bool     `yaml:"enabled"`
-	Socket        string   `yaml:"socket"`
-	HostAddresses []string `yaml:"host_addresses"`
+	Enabled           bool     `yaml:"enabled"`
+	Socket            string   `yaml:"socket"`
+	HostAddresses     []string `yaml:"host_addresses"`
+	HostIPv6Addresses []string `yaml:"host_ipv6_addresses,omitempty"`
 }
 type Discovery struct {
 	Docker Docker `yaml:"docker"`
@@ -65,7 +77,7 @@ type Verification struct {
 }
 
 func Default() Config {
-	return Config{Version: 1, Installation: Installation{Name: "home-lab", DataDirectory: "./.labdns"}, Domain: Domain{Zone: "home.arpa", DefaultTTL: 5 * time.Minute, CreateIPv4: true}, Provider: Provider{Type: "pihole"}, Discovery: Discovery{Docker: Docker{Enabled: true, Socket: "unix:///var/run/docker.sock"}}, Naming: Naming{ServiceTemplate: "{{ .Service }}.{{ .Zone }}", HostTemplate: "{{ .Host }}.{{ .Zone }}", CollisionStrategy: "suffix-host"}, Reconciliation: Reconciliation{Interval: 5 * time.Minute, StaleGracePeriod: 24 * time.Hour, AutomaticUpdates: true}, Verification: Verification{Timeout: 5 * time.Second, SystemResolver: true}}
+	return Config{Version: 1, Installation: Installation{Name: "home-lab", DataDirectory: "./.labdns"}, Domain: Domain{Zone: "home.arpa", DefaultTTL: 5 * time.Minute, CreateIPv4: true}, Provider: Provider{Type: "pihole", BaseURL: "http://10.0.0.2"}, Discovery: Discovery{Docker: Docker{Enabled: true, Socket: "unix:///var/run/docker.sock"}}, Naming: Naming{ServiceTemplate: "{{ .Service }}.{{ .Zone }}", HostTemplate: "{{ .Host }}.{{ .Zone }}", CollisionStrategy: "suffix-host"}, Reconciliation: Reconciliation{Interval: 5 * time.Minute, StaleGracePeriod: 24 * time.Hour, AutomaticUpdates: true}, Verification: Verification{Timeout: 5 * time.Second, SystemResolver: true}}
 }
 func Load(path string) (Config, error) {
 	c := Default()
@@ -86,11 +98,34 @@ func (c Config) Validate() error {
 	if !validZone(c.Domain.Zone) {
 		errs = append(errs, "domain.zone: invalid DNS zone")
 	}
+	if c.Domain.PTRZone != "" && !validZone(c.Domain.PTRZone) {
+		errs = append(errs, "domain.ptr_zone: invalid DNS zone")
+	}
+	if c.Domain.CreatePTR && c.Domain.PTRZone == "" {
+		errs = append(errs, "domain.ptr_zone: required when create_ptr is enabled")
+	}
 	if c.Domain.DefaultTTL < 30*time.Second {
 		errs = append(errs, "domain.default_ttl: must be at least 30 seconds")
 	}
 	if c.Provider.Type == "" {
 		errs = append(errs, "provider.type: required")
+	}
+	switch c.Provider.Type {
+	case "pihole", "adguard", "technitium":
+		if c.Provider.BaseURL == "" {
+			errs = append(errs, "provider.base_url: required for "+c.Provider.Type)
+		}
+	case "rfc2136":
+		if c.Provider.Server == "" {
+			errs = append(errs, "provider.server: required for rfc2136")
+		}
+	case "hostsfile":
+		if c.Provider.HostsFile == "" {
+			errs = append(errs, "provider.hosts_file: required for hostsfile")
+		}
+	case "":
+	default:
+		errs = append(errs, "provider.type: supported values are pihole, adguard, technitium, rfc2136, hostsfile")
 	}
 	if c.Provider.BaseURL != "" {
 		u, e := url.ParseRequestURI(c.Provider.BaseURL)
@@ -98,8 +133,22 @@ func (c Config) Validate() error {
 			errs = append(errs, "provider.base_url: invalid URL")
 		}
 	}
+	if c.Provider.Server != "" && c.Provider.Type == "rfc2136" {
+		if _, _, e := net.SplitHostPort(c.Provider.Server); e != nil {
+			errs = append(errs, "provider.server: must be host:port")
+		}
+	}
+	if c.Provider.Zone != "" && !validZone(c.Provider.Zone) {
+		errs = append(errs, "provider.zone: invalid DNS zone")
+	}
 	if c.Verification.Timeout <= 0 {
 		errs = append(errs, "verification.timeout: must be positive")
+	}
+	if c.Reconciliation.Interval <= 0 && c.Reconciliation.AutomaticUpdates {
+		errs = append(errs, "reconciliation.interval: must be positive when automatic_updates is enabled")
+	}
+	if c.Reconciliation.StaleGracePeriod < 0 {
+		errs = append(errs, "reconciliation.stale_grace_period: must not be negative")
 	}
 	if len(errs) > 0 {
 		return fmt.Errorf("%s", strings.Join(errs, "; "))

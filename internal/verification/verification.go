@@ -67,3 +67,21 @@ func typeCode(t dns.RecordType) uint16 {
 		return mdns.TypeA
 	}
 }
+
+// Probe checks that a DNS server is reachable and answers a simple query.
+func Probe(ctx context.Context, server string, timeout time.Duration) error {
+	if server == "" {
+		return fmt.Errorf("DNS server is not configured")
+	}
+	if timeout <= 0 {
+		timeout = 5 * time.Second
+	}
+	q := new(mdns.Msg)
+	q.SetQuestion(".", mdns.TypeNS)
+	client := mdns.Client{Timeout: timeout}
+	_, _, e := client.ExchangeContext(ctx, q, server)
+	if e != nil {
+		return fmt.Errorf("DNS server %s: %w", server, e)
+	}
+	return nil
+}
