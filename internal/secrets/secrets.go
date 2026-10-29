@@ -19,7 +19,9 @@ func Resolve(ref dns.SecretRef) (string, error) {
 	return "", fmt.Errorf("unsupported secret reference %q; use env:NAME until keyring support is configured", s)
 }
 func Redact(s string) string {
-	if len(s) < 5 {
+	// Showing two chars at each end of anything shorter than 8 would leak
+	// most of the secret.
+	if len(s) < 8 {
 		return "[REDACTED]"
 	}
 	return s[:2] + "…" + s[len(s)-2:]

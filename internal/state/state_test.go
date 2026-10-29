@@ -24,7 +24,6 @@ func open(t *testing.T) *state.Store {
 
 func TestManagedRecordLifecycle(t *testing.T) {
 	s := open(t)
-	ctx := context.Background()
 	if e := s.MarkManaged("pihole", "home.arpa", "app.home.arpa", "A", "10.0.0.2", "svc"); e != nil {
 		t.Fatal(e)
 	}

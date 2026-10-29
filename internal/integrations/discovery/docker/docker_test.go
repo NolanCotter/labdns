@@ -21,17 +21,18 @@ func newServer(t *testing.T) *httptest.Server {
 		{ID: "two", Names: []string{"/host"}},
 		{ID: "three", Names: []string{"/internal"}, Labels: map[string]string{"com.docker.compose.project": "lab"}},
 	}
-	inspections := map[string]inspect{
-		"one":   {},
-		"two":   {HostConfig: struct {
-			NetworkMode string `json:"NetworkMode"`
-		}{NetworkMode: "host"}},
-		"three": {},
-	}
-	inspections["three"].NetworkSettings.Networks = map[string]struct {
+	var three inspect
+	three.NetworkSettings.Networks = map[string]struct {
 		IPAddress         string `json:"IPAddress"`
 		GlobalIPv6Address string `json:"GlobalIPv6Address"`
 	}{"lab": {IPAddress: "172.18.0.3", GlobalIPv6Address: "fd00::3"}}
+	inspections := map[string]inspect{
+		"one": {},
+		"two": {HostConfig: struct {
+			NetworkMode string `json:"NetworkMode"`
+		}{NetworkMode: "host"}},
+		"three": three,
+	}
 	s := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case r.URL.Path == "/containers/json":
